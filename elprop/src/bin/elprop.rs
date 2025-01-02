@@ -1,6 +1,6 @@
 mod code;
 use clap::Parser;
-use code::data::Config;
+use code::data::{Config, Function};
 use code::output::{Output, Status};
 use std::path::Path;
 use std::process::ExitCode;
@@ -111,15 +111,46 @@ fn main() -> ExitCode {
     }
 }
 
-fn get_all_functions(pathbuf: &Path) -> Vec<code::data::Function> {
+fn get_all_functions(pathbuf: &Path) -> Vec<Function> {
     let mut functions = Vec::new();
     for entry in fs::read_dir(pathbuf).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|ex| ex == "rs") {
             let contents = fs::read_to_string(&path).unwrap();
-            let names = code::generate::generate_sigs(&contents, None);
+            let names = get_fn_signatures(&contents);
             functions.extend(names);
         }
     }
     functions
+}
+
+fn get_fn_signatures(string: &str) -> Vec<Function> {
+    syn::parse_file(string)
+        .unwrap()
+        .items
+        .iter()
+        .filter_map(|x| match x {
+            syn::Item::Fn(x) => Some(x),
+            _ => None,
+        })
+        .filter(is_defun)
+        .filter_map(|x| Function::from_item(x).ok())
+        .collect()
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref)]
+fn is_defun(func: &&syn::ItemFn) -> bool {
+    use syn::Meta;
+    use syn::MetaList;
+    for attr in &func.attrs {
+        match &attr.meta {
+            Meta::Path(path) | Meta::List(MetaList { path, .. })
+                if path.get_ident().unwrap() == "defun" =>
+            {
+                return true
+            }
+            _ => {}
+        }
+    }
+    false
 }
